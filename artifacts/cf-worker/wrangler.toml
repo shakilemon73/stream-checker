@@ -1,17 +1,24 @@
 name = "streamguard"
 main = "src/index.ts"
-compatibility_date = "2024-09-23"
+compatibility_date = "2025-01-01"
 compatibility_flags = ["nodejs_compat"]
 
-# ── No Durable Objects, no KV, no Queues — 100% free-tier ────────────────────
-# The only binding needed is DATABASE_URL (set as a secret).
-# Set it with:  wrangler secret put DATABASE_URL
+# ── Free-tier — zero paid bindings ────────────────────────────────────────────
+# DATABASE_URL is stored as a Wrangler secret (never committed to git).
+# Set it once:  wrangler secret put DATABASE_URL
 
 # ── Local dev ─────────────────────────────────────────────────────────────────
-# wrangler picks up .dev.vars automatically; see .dev.vars.example
+# Copy .dev.vars.example → .dev.vars and fill in DATABASE_URL.
+# wrangler picks it up automatically.
 [dev]
 port = 8787
 
-# ── Production ────────────────────────────────────────────────────────────────
-# [env.production]
-# routes = [{ pattern = "your-domain.com/api/*", zone_name = "your-domain.com" }]
+# ── Observability (free, just enables Workers Logs in the dashboard) ──────────
+[observability]
+enabled = true
+
+# ── Optional: custom domain / route ───────────────────────────────────────────
+# Uncomment and edit AFTER deploying once (you'll know the worker URL first).
+# [[routes]]
+# pattern = "api.yourdomain.com/*"
+# zone_name = "yourdomain.com"
