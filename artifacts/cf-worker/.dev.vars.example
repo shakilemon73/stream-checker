@@ -1,0 +1,6 @@
+# Copy this file to .dev.vars and fill in values for local development.
+# .dev.vars is loaded automatically by `wrangler dev` and is gitignored.
+
+# Your Postgres connection string.
+# For local dev you can point at the Replit Postgres, Neon, Supabase, etc.
+DATABASE_URL=postgres://user:password@host:5432/dbname

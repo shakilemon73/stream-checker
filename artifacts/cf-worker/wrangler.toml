@@ -1,0 +1,31 @@
+name = "streamguard"
+main = "src/index.ts"
+compatibility_date = "2024-09-23"
+compatibility_flags = ["nodejs_compat"]
+
+# ── Durable Objects ────────────────────────────────────────────────────────────
+[durable_objects]
+bindings = [
+  { name = "JOB_RUNNER", class_name = "JobRunnerDO" }
+]
+
+[[migrations]]
+tag = "v1"
+new_classes = ["JobRunnerDO"]
+
+# ── Vars (non-secret) ─────────────────────────────────────────────────────────
+# DATABASE_URL must be set as a secret:
+#   wrangler secret put DATABASE_URL
+# For local dev, set it in .dev.vars (see .dev.vars.example)
+
+[vars]
+# placeholder — override per environment below
+
+# ── Local dev ─────────────────────────────────────────────────────────────────
+[dev]
+# wrangler picks up .dev.vars automatically in local dev
+port = 8787
+
+# ── Production environment ────────────────────────────────────────────────────
+# [env.production]
+# routes = [{ pattern = "your-domain.com/api/*", zone_name = "your-domain.com" }]
