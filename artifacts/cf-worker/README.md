@@ -1,114 +1,137 @@
-# StreamGuard — Cloudflare Workers API
+# StreamGuard — Cloudflare Workers API (Free Tier)
 
-A full port of the Express/Node.js API to the Cloudflare Workers edge runtime.
+Runs entirely within the Cloudflare Workers **free plan** — no paid features required.
 
 | Feature | Implementation |
 |---|---|
 | Framework | [Hono](https://hono.dev/) |
 | Database | Drizzle ORM + [@neondatabase/serverless](https://github.com/neondatabase/serverless) (HTTP Postgres) |
-| Real-time progress | Durable Objects + native WebSockets |
-| Job runner | `JobRunnerDO` Durable Object (replaces in-memory queue + Socket.IO) |
-| ffprobe deep-probe | ❌ Not supported at the edge — `/jobs/:id/probe` returns 501 |
+| Job execution | **Client-orchestrated batch polling** — client calls `POST /jobs/:id/process` in a loop |
+| Real-time progress | Client reads `BatchProgress` from each `/process` response — no WebSockets needed |
+| Pause / Resume | DB-persisted `status` field — client stops/resumes its loop |
+| Durable Objects | ❌ Not used |
+| KV / Queues / R2 | ❌ Not used |
+| ffprobe deep-probe | ❌ Not supported at the edge (`/probe` returns 501) |
+
+---
+
+## Free-tier budget per `/process` call
+
+CF Workers free limits and how each batch call fits:
+
+| Limit | Free allowance | Per-batch usage |
+|---|---|---|
+| CPU time | 10 ms | < 2 ms — nearly all time is I/O wait |
+| Subrequests | 50 | ≤ 42 (10 checks × 3 retries + 10 DB writes + 2 overhead) |
+| Wall-clock time | 30 s | ≈ 8–12 s (10 concurrent checks × 8 s timeout) |
+| Requests/day | 100,000 | 1 request per batch of 10 channels |
+
+---
+
+## Client integration
+
+Replace Socket.IO with a simple polling loop on the frontend:
+
+```typescript
+// Start the job
+const job = await fetch('/jobs', {
+  method: 'POST',
+  body: JSON.stringify({ playlistId }),
+}).then(r => r.json());
+
+// Drive the checking loop
+async function runJob(jobId: number) {
+  while (true) {
+    const progress = await fetch(`/jobs/${jobId}/process`, {
+      method: 'POST',
+    }).then(r => r.json());
+
+    // progress: { done, checked, live, dead, geoblocked, suspicious, pending, total, etaSeconds }
+    updateUI(progress);
+
+    if (progress.done) break;
+
+    // Check if the user paused/cancelled (optimistic — next call will see status)
+    const currentStatus = await fetch(`/jobs/${jobId}`).then(r => r.json());
+    if (currentStatus.status === 'paused' || currentStatus.status === 'cancelled') break;
+  }
+}
+```
+
+WebSocket message shape → polling shape mapping:
+
+| Socket.IO `job:progress` field | `/process` response field |
+|---|---|
+| `checked` | `checked` |
+| `live` | `live` |
+| `dead` | `dead` |
+| `geoblocked` | `geoblocked` |
+| `suspicious` | `suspicious` |
+| `pending` | `pending` |
+| `etaSeconds` | `etaSeconds` |
 
 ---
 
 ## Local development
 
-### 1. Create `.dev.vars`
-
 ```bash
-cp .dev.vars.example .dev.vars
-# Fill in DATABASE_URL with your Postgres connection string
+# 1. Copy env file and set your Postgres URL
+cp artifacts/cf-worker/.dev.vars.example artifacts/cf-worker/.dev.vars
+# Edit .dev.vars: DATABASE_URL=postgres://...
+
+# 2. Install deps (from repo root)
+pnpm --filter @workspace/cf-worker install
+
+# 3. Start the dev server (Replit workflow: "artifacts/cf-worker: Wrangler Dev")
+pnpm --filter @workspace/cf-worker run dev
+# → http://localhost:8787
 ```
 
-### 2. Install dependencies
+---
+
+## Deploy to Cloudflare (free plan)
 
 ```bash
 cd artifacts/cf-worker
-pnpm install
-```
 
-### 3. Start the local dev server
-
-```bash
-pnpm dev
-# Listens on http://localhost:8787 by default
-# Wrangler loads .dev.vars automatically
-```
-
----
-
-## Deploy to Cloudflare
-
-### Prerequisites
-
-- A Cloudflare account with Workers & Durable Objects enabled (paid plan required for Durable Objects)
-- A Postgres database reachable from Cloudflare's network — recommended options:
-  - **[Neon](https://neon.tech)** (serverless, free tier, HTTP-compatible)
-  - **[Supabase](https://supabase.com)** (managed Postgres)
-  - **[Cloudflare Hyperdrive](https://developers.cloudflare.com/hyperdrive/)** (if you have an existing Postgres)
-
-### 1. Authenticate wrangler
-
-```bash
+# Authenticate
 npx wrangler login
-```
 
-### 2. Set the database URL secret
-
-```bash
+# Store your Postgres connection string as a secret
 npx wrangler secret put DATABASE_URL
-# Paste your Postgres connection string when prompted
+# Paste: postgres://user:pass@host/db  (Neon, Supabase, or any accessible Postgres)
+
+# Deploy
+pnpm run deploy
 ```
 
-### 3. Deploy
+### Recommended free Postgres options
+
+| Provider | Free tier | Notes |
+|---|---|---|
+| [Neon](https://neon.tech) | 0.5 GB, HTTP driver native | Best fit — driver already configured |
+| [Supabase](https://supabase.com) | 500 MB | Use connection pooler URL |
+| [Aiven](https://aiven.io) | 5 GB (trial) | Standard Postgres URL |
+
+### Point existing Postgres at Neon
+
+If you want to migrate the Replit Postgres data to Neon:
 
 ```bash
-pnpm deploy
-```
+# Dump from Replit Postgres
+pg_dump $DATABASE_URL > dump.sql
 
-### 4. (Optional) Point a custom domain
-
-Edit `wrangler.toml` and add:
-
-```toml
-[env.production]
-routes = [
-  { pattern = "your-domain.com/api/*", zone_name = "your-domain.com" }
-]
-```
-
----
-
-## Frontend WebSocket connection
-
-The frontend connects to job progress via WebSocket at:
-
-```
-wss://<worker-domain>/jobs/<jobId>/ws
-```
-
-Update `artifacts/streamguard/src/lib/socket.ts` (or wherever `io()` is called) to use this endpoint instead of Socket.IO:
-
-```ts
-const ws = new WebSocket(`wss://your-worker.workers.dev/jobs/${jobId}/ws`);
-ws.addEventListener("message", (e) => {
-  const msg = JSON.parse(e.data);
-  if (msg.type === "job:progress") { /* update counters */ }
-  if (msg.type === "job:result")   { /* append result row */ }
-  if (msg.type === "job:status")   { /* job finished */ }
-});
+# Restore to Neon
+psql $NEON_DATABASE_URL < dump.sql
 ```
 
 ---
 
 ## Schema
 
-The DB schema is identical to the Postgres schema in `lib/db/`. Run migrations
-against your target Postgres using the existing `lib/db` drizzle-kit config,
-then point the Worker at the same database.
+The `src/schema.ts` is identical to `lib/db/src/schema/`. Push it to your target DB:
 
 ```bash
-# From repo root — pushes schema to whichever DB is in DATABASE_URL
-cd lib/db && DATABASE_URL=<your-target-db> pnpm push
+cd lib/db
+DATABASE_URL=<your-neon-url> pnpm push
 ```

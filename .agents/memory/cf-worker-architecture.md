@@ -6,12 +6,17 @@ description: How the StreamGuard Cloudflare Workers port is structured and what 
 ## Location
 `artifacts/cf-worker/` — standalone pnpm package, not a registered artifact type (createArtifact has no CF Workers type)
 
-## Stack
+## Stack — FREE TIER (no Durable Objects, no KV, no Queues)
 - **Framework**: Hono (replaces Express)
 - **DB**: Drizzle ORM + `@neondatabase/serverless` HTTP driver — works in Workers without Hyperdrive
 - **Schema**: `src/schema.ts` is a copy of `lib/db/src/schema/` — same Postgres DDL, no migration needed if pointing at the same DB
-- **Real-time**: Durable Objects + native WebSocket API (replaces Socket.IO)
-- **Job runner**: `JobRunnerDO` Durable Object — one instance per job ID, runs via `state.waitUntil()`
+- **Job runner**: client-orchestrated batch polling — client calls `POST /jobs/:id/process` in a loop, each call checks ≤10 channels concurrently and returns `BatchProgress { done, checked, live, dead, ... }`
+- **Pause/cancel**: stored in `jobs.status` DB column — process endpoint returns early if status is paused/cancelled
+
+## Free-tier budget per /process call (batch=10)
+- CPU: <2ms (pure I/O wait — under 10ms limit) ✅
+- Subrequests: ≤42 (10 checks × 3 retries + 10 DB writes + 2 overhead — under 50 limit) ✅
+- Wall clock: ~8–12s (10 concurrent × 8s timeout — under 30s limit) ✅
 
 ## Key differences from Express server
 | Feature | Express | CF Worker |
@@ -20,16 +25,8 @@ description: How the StreamGuard Cloudflare Workers port is structured and what 
 | p-limit | npm package | custom `createLimiter()` in `src/lib/limiter.ts` |
 | timers/promises | Node import | `new Promise(r => setTimeout(r, ms))` |
 | Buffer.from(b64) | Node Buffer | `atob()` + TextDecoder |
-| Socket.IO | socket.io package | DO WebSockets at `GET /jobs/:id/ws` |
-| In-memory activeJobs | Map in job-queue.ts | DO storage (`state.storage.put("control", ...)`) |
-
-## DO command routing
-Worker → DO via `stub.fetch("https://do/do/<jobId>/<path>")`:
-- `POST /start` — begins job, `state.waitUntil(runJob())`
-- `POST /pause` — sets `state.storage` key "control" = "paused"
-- `POST /resume` — sets key to "running"
-- `POST /cancel` — sets key to "cancelled"
-- `GET /ws` (WebSocket upgrade) — `state.acceptWebSocket(server)`, broadcasts `job:progress`, `job:result`, `job:status`
+| Socket.IO | socket.io + WebSockets | client polls `/jobs/:id/process` response |
+| In-memory activeJobs | Map in job-queue.ts | DB `jobs.status` column |
 
 ## Dev setup
 1. Copy `.dev.vars.example` → `.dev.vars`, fill `DATABASE_URL`
