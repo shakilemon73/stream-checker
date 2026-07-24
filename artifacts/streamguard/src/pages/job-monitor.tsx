@@ -24,7 +24,8 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { 
   Play, Pause, XCircle, Download, Search, SearchCode, 
-  ChevronRight, Activity, ArrowLeft, Loader2, Image as ImageIcon
+  ChevronRight, Activity, ArrowLeft, Loader2, Image as ImageIcon,
+  Copy, Check, ClipboardList, X as XIcon
 } from "lucide-react";
 import { 
   Drawer, DrawerContent, DrawerHeader, DrawerTitle, DrawerDescription 
@@ -78,6 +79,26 @@ export default function JobMonitor() {
   
   // Drawer state
   const [selectedResult, setSelectedResult] = useState<ChannelResult | null>(null);
+
+  // Copy / batch-select state
+  const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
+  const [copiedId, setCopiedId] = useState<number | "batch-url" | "batch-m3u" | null>(null);
+
+  const copyText = useCallback((text: string, id: number | "batch-url" | "batch-m3u") => {
+    navigator.clipboard.writeText(text).then(() => {
+      setCopiedId(id);
+      setTimeout(() => setCopiedId(null), 1500);
+    });
+  }, []);
+
+  const toggleSelect = useCallback((id: number, e: React.MouseEvent) => {
+    e.stopPropagation();
+    setSelectedIds(prev => {
+      const next = new Set(prev);
+      next.has(id) ? next.delete(id) : next.add(id);
+      return next;
+    });
+  }, []);
 
   // Load complete results if job is done
   const isFinished = liveStatus === "completed" || liveStatus === "cancelled" || liveStatus === "failed";
@@ -180,6 +201,33 @@ export default function JobMonitor() {
     
     return filtered;
   }, [isFinished, apiResults, socketResults, search, statusFilter, categoryFilter, sortBy, sortDir]);
+
+  const toggleSelectAll = useCallback(() => {
+    setSelectedIds(prev =>
+      prev.size === displayResults.length
+        ? new Set()
+        : new Set(displayResults.map(r => r.id))
+    );
+  }, [displayResults]);
+
+  const copyBatchUrls = useCallback(() => {
+    const urls = displayResults.filter(r => selectedIds.has(r.id)).map(r => r.url).join("\n");
+    copyText(urls, "batch-url");
+  }, [displayResults, selectedIds, copyText]);
+
+  const copyBatchM3U = useCallback(() => {
+    const lines = ["#EXTM3U"];
+    displayResults.filter(r => selectedIds.has(r.id)).forEach(r => {
+      const attrs = [
+        r.tvgName  ? `tvg-name="${r.tvgName}"`   : "",
+        r.tvgLogo  ? `tvg-logo="${r.tvgLogo}"`   : "",
+        r.category ? `group-title="${r.category}"` : "",
+      ].filter(Boolean).join(" ");
+      lines.push(`#EXTINF:-1 ${attrs},${r.tvgName || r.url}`);
+      lines.push(r.url);
+    });
+    copyText(lines.join("\n"), "batch-m3u");
+  }, [displayResults, selectedIds, copyText]);
 
   // Categories display logic
   const categoriesList = useMemo(() => {
@@ -366,8 +414,53 @@ export default function JobMonitor() {
 
         {/* MAIN RESULTS AREA */}
         <div className="flex-1 flex flex-col min-w-0 bg-background">
+          {/* Batch action toolbar — floats above table when rows are selected */}
+          {selectedIds.size > 0 && (
+            <div className="flex items-center gap-2 px-4 py-2 bg-primary/5 border-b border-primary/20 text-sm">
+              <span className="font-mono text-xs text-muted-foreground mr-1">
+                {selectedIds.size} selected
+              </span>
+              <Button
+                size="sm" variant="outline" className="h-7 text-xs gap-1.5"
+                onClick={copyBatchUrls}
+              >
+                {copiedId === "batch-url"
+                  ? <><Check className="w-3 h-3 text-green-500" /> Copied!</>
+                  : <><Copy className="w-3 h-3" /> Copy URLs</>}
+              </Button>
+              <Button
+                size="sm" variant="outline" className="h-7 text-xs gap-1.5"
+                onClick={copyBatchM3U}
+              >
+                {copiedId === "batch-m3u"
+                  ? <><Check className="w-3 h-3 text-green-500" /> Copied!</>
+                  : <><ClipboardList className="w-3 h-3" /> Copy as M3U</>}
+              </Button>
+              <Button
+                size="sm" variant="ghost" className="h-7 text-xs gap-1 ml-auto text-muted-foreground"
+                onClick={() => setSelectedIds(new Set())}
+              >
+                <XIcon className="w-3 h-3" /> Clear
+              </Button>
+            </div>
+          )}
+
           {/* Filters Bar */}
           <div className="p-4 border-b flex flex-wrap items-center gap-4 bg-card/30">
+            {/* Select-all checkbox */}
+            <button
+              className="w-4 h-4 rounded border border-input bg-background flex items-center justify-center shrink-0 hover:border-primary transition-colors"
+              onClick={toggleSelectAll}
+              title={selectedIds.size === displayResults.length && displayResults.length > 0 ? "Deselect all" : "Select all"}
+            >
+              {selectedIds.size > 0 && selectedIds.size === displayResults.length && (
+                <Check className="w-3 h-3 text-primary" />
+              )}
+              {selectedIds.size > 0 && selectedIds.size < displayResults.length && (
+                <div className="w-2 h-0.5 bg-primary rounded" />
+              )}
+            </button>
+
             <div className="relative w-64">
               <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
               <Input 
@@ -441,16 +534,35 @@ export default function JobMonitor() {
                   const result = displayResults[virtualItem.index];
                   const colorClass = statusColors[result.status as keyof typeof statusColors];
                   
+                  const isChecked = selectedIds.has(result.id);
+                  const isCopied  = copiedId === result.id;
+
                   return (
                     <div
                       key={virtualItem.key}
-                      className="absolute top-0 left-0 w-full flex items-center border-b px-4 hover:bg-muted/30 cursor-pointer transition-colors"
+                      className={cn(
+                        "absolute top-0 left-0 w-full flex items-center border-b px-4 transition-colors group",
+                        isChecked ? "bg-primary/5" : "hover:bg-muted/30",
+                        "cursor-pointer"
+                      )}
                       style={{
                         height: `${virtualItem.size}px`,
                         transform: `translateY(${virtualItem.start}px)`,
                       }}
                       onClick={() => setSelectedResult(result)}
                     >
+                      {/* Checkbox */}
+                      <div className="w-6 shrink-0 flex items-center mr-2" onClick={e => toggleSelect(result.id, e)}>
+                        <div className={cn(
+                          "w-4 h-4 rounded border flex items-center justify-center transition-colors",
+                          isChecked
+                            ? "bg-primary border-primary"
+                            : "border-input bg-background opacity-0 group-hover:opacity-100"
+                        )}>
+                          {isChecked && <Check className="w-2.5 h-2.5 text-primary-foreground" />}
+                        </div>
+                      </div>
+
                       <div className="w-24 shrink-0">
                         <Badge variant="outline" className={cn("text-[10px] uppercase border-0 px-2", colorClass)}>
                           {result.status}
@@ -475,8 +587,13 @@ export default function JobMonitor() {
                       <div className="w-24 shrink-0 font-mono text-[10px] text-right text-muted-foreground">
                         {result.probeData?.width ? `${result.probeData.width}x${result.probeData.height}` : '-'}
                       </div>
-                      <div className="w-8 shrink-0 flex justify-end">
-                        <ChevronRight className="w-4 h-4 text-muted-foreground opacity-50" />
+
+                      {/* Per-row copy button */}
+                      <div className="w-8 shrink-0 flex justify-end" onClick={e => { e.stopPropagation(); copyText(result.url, result.id); }}>
+                        {isCopied
+                          ? <Check className="w-4 h-4 text-green-500" />
+                          : <Copy className="w-3.5 h-3.5 text-muted-foreground opacity-0 group-hover:opacity-60 hover:!opacity-100 transition-opacity" />
+                        }
                       </div>
                     </div>
                   );
