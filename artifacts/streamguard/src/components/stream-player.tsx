@@ -58,7 +58,9 @@ function detectFormat(url: string, mimeType?: string | null): FormatInfo {
 
 // ── VLC suggestion panel ──────────────────────────────────────────────────────
 
-function VLCSuggestion({ url, label, reason }: { url: string; label: string; reason: string }) {
+type VLCReason = "protocol" | "format" | "cors" | "unavailable";
+
+function VLCSuggestion({ url, label, reason }: { url: string; label: string; reason: VLCReason }) {
   const [copied, setCopied] = useState(false);
   const copy = () => {
     navigator.clipboard.writeText(url).then(() => {
@@ -68,18 +70,22 @@ function VLCSuggestion({ url, label, reason }: { url: string; label: string; rea
   };
 
   const msg =
-    reason === "protocol"
-      ? `${label} streams cannot play in a browser`
-      : `${label} streams require a native media player`;
+    reason === "protocol"  ? `${label} streams cannot play in a browser` :
+    reason === "cors"      ? "Stream blocked by browser security (CORS)" :
+    reason === "unavailable" ? "Stream unavailable or timed out" :
+    `${label} streams require a native media player`;
+
+  const sub =
+    reason === "cors"
+      ? "The stream server doesn't allow browser playback. Open it directly in VLC or an IPTV app."
+      : "Open in VLC, IPTV Smarters, or any player that supports this format";
 
   return (
     <div className="rounded-lg border border-dashed border-yellow-500/40 bg-yellow-500/5 p-5 flex flex-col items-center gap-3 text-center">
       <Tv2 className="w-9 h-9 text-yellow-500/70" />
       <div>
         <p className="font-semibold text-sm">{msg}</p>
-        <p className="text-xs text-muted-foreground mt-1">
-          Open in VLC, IPTV Smarters, or any player that supports this format
-        </p>
+        <p className="text-xs text-muted-foreground mt-1">{sub}</p>
       </div>
       <div className="flex gap-2 flex-wrap justify-center">
         <Button size="sm" variant="outline" className="gap-1.5 text-xs h-8" asChild>
@@ -90,9 +96,16 @@ function VLCSuggestion({ url, label, reason }: { url: string; label: string; rea
         <Button size="sm" variant="ghost" className="gap-1.5 text-xs h-8" onClick={copy}>
           {copied ? "Copied!" : "Copy URL"}
         </Button>
+        {(reason === "cors" || reason === "unavailable") && (
+          <Button size="sm" variant="ghost" className="gap-1.5 text-xs h-8" asChild>
+            <a href={url} target="_blank" rel="noreferrer">
+              <ExternalLink className="w-3 h-3" /> Open URL
+            </a>
+          </Button>
+        )}
       </div>
       <Badge variant="outline" className="font-mono text-[10px] text-yellow-600 border-yellow-500/30">
-        {label}
+        {reason === "cors" ? "CORS blocked" : label}
       </Badge>
     </div>
   );
@@ -115,8 +128,8 @@ export function StreamPlayer({ url, mimeType, title, className }: StreamPlayerPr
   const [error,     setError]     = useState<string | null>(null);
   const [muted,     setMuted]     = useState(true);
   const [playing,   setPlaying]   = useState(false);
-  // If the optimistic HLS attempt fails for unknown-http, show VLC panel
-  const [hlsFailed, setHlsFailed] = useState(false);
+  // When HLS fails, store the reason so VLC panel can show an accurate message
+  const [hlsFailed, setHlsFailed] = useState<VLCReason | null>(null);
 
   const fmt = detectFormat(url, mimeType);
 
@@ -126,14 +139,18 @@ export function StreamPlayer({ url, mimeType, title, className }: StreamPlayerPr
     if (v) { v.pause(); v.removeAttribute("src"); v.load(); }
   }, []);
 
-  const setupHls = useCallback((videoEl: HTMLVideoElement, streamUrl: string, isOptimistic = false) => {
+  const setupHls = useCallback((videoEl: HTMLVideoElement, streamUrl: string) => {
     if (Hls.isSupported()) {
       const hls = new Hls({
         enableWorker: true,
         lowLatencyMode: true,
         backBufferLength: 30,
-        manifestLoadingTimeOut: 8000,
+        manifestLoadingTimeOut: 10000,
         manifestLoadingMaxRetry: 1,
+        xhrSetup: (xhr) => {
+          // Don't send credentials — avoids preflight failures on CORS-strict servers
+          xhr.withCredentials = false;
+        },
       });
       hlsRef.current = hls;
       hls.loadSource(streamUrl);
@@ -152,11 +169,13 @@ export function StreamPlayer({ url, mimeType, title, className }: StreamPlayerPr
           hls.destroy();
           hlsRef.current = null;
           setLoading(false);
-          if (isOptimistic) {
-            setHlsFailed(true);   // fall back to VLC suggestion
-          } else {
-            setError(`Playback error: ${data.details ?? "stream unavailable"}`);
-          }
+
+          // Distinguish CORS (network error with status 0) from plain unavailability
+          const isCors =
+            data.type === Hls.ErrorTypes.NETWORK_ERROR &&
+            (data.response?.code === 0 || data.response?.code == null);
+
+          setHlsFailed(isCors ? "cors" : "unavailable");
         }
       });
     } else if (videoEl.canPlayType("application/vnd.apple.mpegurl")) {
@@ -169,8 +188,7 @@ export function StreamPlayer({ url, mimeType, title, className }: StreamPlayerPr
       };
       videoEl.onerror = () => {
         setLoading(false);
-        if (isOptimistic) setHlsFailed(true);
-        else setError("Stream unavailable or unsupported format");
+        setHlsFailed("unavailable");
       };
     } else {
       setLoading(false);
@@ -185,13 +203,13 @@ export function StreamPlayer({ url, mimeType, title, className }: StreamPlayerPr
     setLoading(true);
     setError(null);
     setPlaying(false);
-    setHlsFailed(false);
+    setHlsFailed(null);
     destroy();
 
     if (fmt.type === "vlc-only") { setLoading(false); return; }
 
     if (fmt.type === "hls" || fmt.type === "unknown-http") {
-      setupHls(video, url, fmt.type === "unknown-http");
+      setupHls(video, url);
       return;
     }
 
@@ -211,13 +229,13 @@ export function StreamPlayer({ url, mimeType, title, className }: StreamPlayerPr
     return destroy;
   }, [url, fmt.type, destroy, setupHls]);
 
-  // ── VLC-only or optimistic HLS that failed ─────────────────────────────────
+  // ── VLC-only or HLS that failed to load ───────────────────────────────────
   if (fmt.type === "vlc-only" || hlsFailed) {
     return (
       <VLCSuggestion
         url={url}
-        label={hlsFailed ? "Stream" : fmt.label}
-        reason={hlsFailed ? "format" : fmt.reason}
+        label={fmt.label}
+        reason={hlsFailed ?? fmt.reason as VLCReason}
       />
     );
   }
@@ -246,7 +264,7 @@ export function StreamPlayer({ url, mimeType, title, className }: StreamPlayerPr
           <p className="text-xs text-center text-white/70 max-w-[240px] leading-relaxed mb-3">{error}</p>
           <div className="flex gap-2 flex-wrap justify-center">
             <Button size="sm" variant="secondary" className="text-xs h-7"
-              onClick={() => { setError(null); setLoading(true); setupHls(videoRef.current!, url); }}>
+              onClick={() => { setError(null); setHlsFailed(null); setLoading(true); setupHls(videoRef.current!, url); }}>
               Retry
             </Button>
             <Button size="sm" variant="ghost" className="text-xs h-7 gap-1" asChild>
