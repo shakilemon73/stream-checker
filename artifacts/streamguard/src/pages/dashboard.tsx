@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { Activity } from "lucide-react";
+import { toast } from "sonner";
 import { useListJobs, useCreatePlaylist, useCreateJob } from "@workspace/api-client-react";
 import { Link, useLocation } from "wouter";
 import { formatMs, formatTime } from "@/lib/utils";
@@ -36,8 +37,8 @@ export default function Dashboard() {
   const [fileDragging, setFileDragging] = useState(false);
 
   const handleRunCheck = async () => {
-    if (!playlistName) {
-      alert("Please enter a playlist name");
+    if (!playlistName.trim()) {
+      toast.error("Please enter a playlist name");
       return;
     }
     
@@ -45,11 +46,13 @@ export default function Dashboard() {
       // 1. Create Playlist
       let inputData: any = { name: playlistName, sourceType: activeTab };
       if (activeTab === "text") {
+        if (!m3uText.trim()) { toast.error("Please paste M3U content"); return; }
         inputData.content = m3uText;
       } else if (activeTab === "url") {
+        if (!m3uUrl.trim()) { toast.error("Please enter a playlist URL"); return; }
         inputData.url = m3uUrl;
       } else if (activeTab === "file") {
-        if (!m3uFile) { alert("Please select an M3U file"); return; }
+        if (!m3uFile) { toast.error("Please select an M3U file"); return; }
         // Read file as base64 — the API decodes it on the server
         const base64 = await new Promise<string>((resolve, reject) => {
           const reader = new FileReader();
@@ -72,8 +75,9 @@ export default function Dashboard() {
           playlistId: playlist.id,
           settings: {
             concurrency: concurrency[0],
-            timeoutMs: parseInt(timeoutMs),
-            retryCount: parseInt(retryCount),
+            timeoutMs: parseInt(timeoutMs) || 10000,
+            retryCount: parseInt(retryCount) || 1,
+            perHostConcurrency: parseInt(perHostConcurrency) || 10,
             autoProbe,
           } as any
         }
@@ -81,8 +85,9 @@ export default function Dashboard() {
 
       // 3. Navigate to Job Monitor
       setLocation(`/jobs/${job.id}`);
-    } catch (err) {
+    } catch (err: any) {
       console.error(err);
+      toast.error(err?.message ?? "Failed to start job. Check the console for details.");
     }
   };
 
@@ -236,7 +241,7 @@ export default function Dashboard() {
           ) : !jobs || jobs.length === 0 ? (
             <Card>
               <CardContent className="p-8 text-center text-muted-foreground flex flex-col items-center">
-                <AlertCircle className="w-8 h-8 mb-2 opacity-50" />
+                <AlertCircle className="w-8 h-8 mb-2 opacity-50 text-muted-foreground" />
                 <p>No jobs found</p>
               </CardContent>
             </Card>
@@ -267,10 +272,12 @@ export default function Dashboard() {
                           )}
                         </div>
                         <div className="h-2 w-full bg-muted overflow-hidden flex rounded-full">
-                          <div className="h-full bg-[hsl(var(--live))]" style={{ width: `${(job.live / job.total) * 100}%` }} />
-                          <div className="h-full bg-[hsl(var(--dead))]" style={{ width: `${(job.dead / job.total) * 100}%` }} />
-                          <div className="h-full bg-[hsl(var(--geoblocked))]" style={{ width: `${(job.geoblocked / job.total) * 100}%` }} />
-                          <div className="h-full bg-[hsl(var(--suspicious))]" style={{ width: `${(job.suspicious / job.total) * 100}%` }} />
+                          {job.total > 0 && <>
+                            <div className="h-full bg-[hsl(var(--live))]" style={{ width: `${(job.live / job.total) * 100}%` }} />
+                            <div className="h-full bg-[hsl(var(--dead))]" style={{ width: `${(job.dead / job.total) * 100}%` }} />
+                            <div className="h-full bg-[hsl(var(--geoblocked))]" style={{ width: `${(job.geoblocked / job.total) * 100}%` }} />
+                            <div className="h-full bg-[hsl(var(--suspicious))]" style={{ width: `${(job.suspicious / job.total) * 100}%` }} />
+                          </>}
                         </div>
                       </div>
                     </CardContent>

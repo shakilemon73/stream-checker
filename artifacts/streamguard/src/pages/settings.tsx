@@ -56,13 +56,13 @@ export default function Settings() {
     e.preventDefault();
     updateSettings.mutate({
       data: {
-        defaultConcurrency: parseInt(formData.defaultConcurrency),
-        defaultTimeoutMs: parseInt(formData.defaultTimeoutMs),
-        defaultRetryCount: parseInt(formData.defaultRetryCount),
-        perHostConcurrency: parseInt(formData.perHostConcurrency),
-        maxConcurrency: parseInt(formData.maxConcurrency),
+        defaultConcurrency: parseInt(formData.defaultConcurrency) || 50,
+        defaultTimeoutMs: parseInt(formData.defaultTimeoutMs) || 10000,
+        defaultRetryCount: parseInt(formData.defaultRetryCount) || 1,
+        perHostConcurrency: parseInt(formData.perHostConcurrency) || 10,
+        maxConcurrency: parseInt(formData.maxConcurrency) || 1000,
         autoProbeDefault: formData.autoProbeDefault,
-        ffprobePath: formData.ffprobePath
+        ffprobePath: formData.ffprobePath || "ffprobe"
       }
     }, {
       onSuccess: () => {

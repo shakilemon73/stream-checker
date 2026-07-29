@@ -97,7 +97,7 @@ export default function PlaylistLibrary() {
                 </div>
 
                 <div className="flex items-center gap-4 md:gap-6 shrink-0">
-                  <div className="flex gap-2">
+                  <div className="flex flex-wrap gap-2">
                     {playlist.parseWarnings.length > 0 && (
                       <Badge variant="outline" className="bg-[hsl(var(--suspicious))]/10 text-[hsl(var(--suspicious))] border-[hsl(var(--suspicious))]/20 gap-1 font-mono">
                         <AlertTriangle className="w-3 h-3" />

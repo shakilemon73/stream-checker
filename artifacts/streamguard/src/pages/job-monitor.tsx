@@ -146,20 +146,20 @@ export default function JobMonitor() {
     socket.on("job:result", (data: { jobId: number, result: ChannelResult }) => {
       setSocketResults(prev => [data.result, ...prev]);
       
-      if (data.result.category) {
-        const cat = data.result.category;
-        setSocketCategories(prev => {
-          const existing = prev[cat] || { total: 0, live: 0, dead: 0 };
-          return {
-            ...prev,
-            [cat]: {
-              total: existing.total + 1,
-              live: existing.live + (data.result.status === "live" ? 1 : 0),
-              dead: existing.dead + (data.result.status === "dead" ? 1 : 0)
-            }
-          };
-        });
-      }
+      // Use "Uncategorized" as the key when category is null/empty so these
+      // channels always appear in the sidebar category list during live runs
+      const cat = data.result.category || "Uncategorized";
+      setSocketCategories(prev => {
+        const existing = prev[cat] || { total: 0, live: 0, dead: 0 };
+        return {
+          ...prev,
+          [cat]: {
+            total: existing.total + 1,
+            live: existing.live + (data.result.status === "live" ? 1 : 0),
+            dead: existing.dead + (data.result.status === "dead" ? 1 : 0)
+          }
+        };
+      });
     });
 
     return () => {
@@ -189,11 +189,18 @@ export default function JobMonitor() {
       filtered = filtered.filter(r => r.category === categoryFilter);
     }
     
-    // Client-side sorting
+    // Client-side sorting — status uses priority order, other fields alphabetical/numeric
+    const STATUS_ORDER: Record<string, number> = { live: 0, suspicious: 1, geoblocked: 2, dead: 3, pending: 4 };
     filtered = [...filtered].sort((a, b) => {
       let valA: any = a[sortBy as keyof ChannelResult];
       let valB: any = b[sortBy as keyof ChannelResult];
       
+      if (sortBy === "status") {
+        const pa = STATUS_ORDER[valA as string] ?? 5;
+        const pb = STATUS_ORDER[valB as string] ?? 5;
+        return sortDir === "asc" ? pa - pb : pb - pa;
+      }
+
       if (valA == null) valA = "";
       if (valB == null) valB = "";
       
@@ -288,42 +295,45 @@ export default function JobMonitor() {
     <div className="flex flex-col h-screen overflow-hidden bg-background">
       {/* HEADER BAND */}
       <div className="flex-shrink-0 border-b bg-card">
-        <div className="px-6 py-4 flex items-center justify-between">
-          <div className="flex items-center gap-4">
-            <Button variant="ghost" size="icon" onClick={() => setLocation("/")} className="mr-2">
+        <div className="px-4 py-3 flex flex-wrap items-center gap-x-4 gap-y-2">
+          {/* Back + title */}
+          <div className="flex items-center gap-3 min-w-0 flex-1">
+            <Button variant="ghost" size="icon" onClick={() => setLocation("/")} className="shrink-0">
               <ArrowLeft className="w-5 h-5" />
             </Button>
-            <div>
-              <div className="flex items-center gap-3">
-                <h1 className="text-xl font-bold tracking-tight truncate max-w-[300px]" title={job?.playlistName}>{job?.playlistName}</h1>
+            <div className="min-w-0">
+              <div className="flex items-center gap-2 flex-wrap">
+                <h1 className="text-lg font-bold tracking-tight truncate max-w-[240px]" title={job?.playlistName}>{job?.playlistName}</h1>
                 <Badge variant="outline" className={cn(
+                  "shrink-0",
                   liveStatus === 'running' ? 'bg-primary/10 text-primary border-primary/20' : 
                   liveStatus === 'completed' ? 'bg-[hsl(var(--live))]/10 text-[hsl(var(--live))] border-[hsl(var(--live))]/20' : ''
                 )}>
                   {liveStatus.toUpperCase()}
                 </Badge>
               </div>
-              <p className="text-sm text-muted-foreground font-mono mt-1">
-                {liveStats.checked.toLocaleString()} / {totalChannels.toLocaleString()} checked 
+              <p className="text-xs text-muted-foreground font-mono mt-0.5">
+                {liveStats.checked.toLocaleString()} / {totalChannels.toLocaleString()} checked
                 {liveStats.etaSeconds != null && liveStatus === "running" && ` • ETA ${formatTime(liveStats.etaSeconds)}`}
                 {liveStats.avgCheckMs != null && ` • ${Math.round(liveStats.avgCheckMs)}ms avg`}
               </p>
             </div>
           </div>
 
-          <div className="flex items-center gap-6">
-            <div className="flex gap-4 font-mono text-sm border-r pr-6">
+          {/* Stats + actions — wrap to next line on small screens */}
+          <div className="flex items-center gap-4 shrink-0 ml-auto">
+            <div className="flex gap-3 font-mono text-sm border-r pr-4">
               <div className="flex flex-col items-end text-[hsl(var(--live))]">
-                <span className="text-xs opacity-70 uppercase tracking-widest">Live</span>
-                <span className="font-bold text-lg leading-none">{liveStats.live.toLocaleString()}</span>
+                <span className="text-[10px] opacity-70 uppercase tracking-widest">Live</span>
+                <span className="font-bold text-base leading-none">{liveStats.live.toLocaleString()}</span>
               </div>
               <div className="flex flex-col items-end text-[hsl(var(--dead))]">
-                <span className="text-xs opacity-70 uppercase tracking-widest">Dead</span>
-                <span className="font-bold text-lg leading-none">{liveStats.dead.toLocaleString()}</span>
+                <span className="text-[10px] opacity-70 uppercase tracking-widest">Dead</span>
+                <span className="font-bold text-base leading-none">{liveStats.dead.toLocaleString()}</span>
               </div>
               <div className="flex flex-col items-end text-[hsl(var(--geoblocked))]">
-                <span className="text-xs opacity-70 uppercase tracking-widest">Geo</span>
-                <span className="font-bold text-lg leading-none">{liveStats.geoblocked.toLocaleString()}</span>
+                <span className="text-[10px] opacity-70 uppercase tracking-widest">Geo</span>
+                <span className="font-bold text-base leading-none">{liveStats.geoblocked.toLocaleString()}</span>
               </div>
             </div>
             
@@ -331,20 +341,20 @@ export default function JobMonitor() {
               {liveStatus === "running" && (
                 <>
                   <Button variant="secondary" size="sm" onClick={() => pauseJob.mutate({ id: jobId })} disabled={pauseJob.isPending}>
-                    <Pause className="w-4 h-4 mr-2" /> Pause
+                    <Pause className="w-4 h-4 sm:mr-2" /><span className="hidden sm:inline">Pause</span>
                   </Button>
                   <Button variant="destructive" size="sm" onClick={() => cancelJob.mutate({ id: jobId })} disabled={cancelJob.isPending}>
-                    <XCircle className="w-4 h-4 mr-2" /> Cancel
+                    <XCircle className="w-4 h-4 sm:mr-2" /><span className="hidden sm:inline">Cancel</span>
                   </Button>
                 </>
               )}
               {liveStatus === "paused" && (
                 <>
                   <Button variant="default" size="sm" onClick={() => resumeJob.mutate({ id: jobId })} disabled={resumeJob.isPending}>
-                    <Play className="w-4 h-4 mr-2" /> Resume
+                    <Play className="w-4 h-4 sm:mr-2" /><span className="hidden sm:inline">Resume</span>
                   </Button>
                   <Button variant="destructive" size="sm" onClick={() => cancelJob.mutate({ id: jobId })} disabled={cancelJob.isPending}>
-                    <XCircle className="w-4 h-4 mr-2" /> Cancel
+                    <XCircle className="w-4 h-4 sm:mr-2" /><span className="hidden sm:inline">Cancel</span>
                   </Button>
                 </>
               )}
@@ -352,12 +362,12 @@ export default function JobMonitor() {
                 <>
                   <Button variant="outline" size="sm" asChild>
                     <a href={`/api/jobs/${jobId}/export?format=m3u&status=live`} download>
-                      <Download className="w-4 h-4 mr-2" /> M3U (Live)
+                      <Download className="w-4 h-4 sm:mr-2" /><span className="hidden sm:inline">M3U (Live)</span>
                     </a>
                   </Button>
                   <Button variant="outline" size="sm" asChild>
                     <a href={`/api/jobs/${jobId}/export?format=csv`} download>
-                      <Download className="w-4 h-4 mr-2" /> CSV
+                      <Download className="w-4 h-4 sm:mr-2" /><span className="hidden sm:inline">CSV</span>
                     </a>
                   </Button>
                 </>
@@ -405,10 +415,12 @@ export default function JobMonitor() {
                     <span className="truncate pr-2" title={cat.name}>{cat.name || "Uncategorized"}</span>
                     <span className="font-mono text-xs opacity-70">{cat.total}</span>
                   </div>
-                  <div className="h-1 w-full bg-muted overflow-hidden flex rounded-full opacity-50 group-hover:opacity-100 transition-opacity">
-                    <div className="h-full bg-[hsl(var(--live))]" style={{ width: `${(cat.live / cat.total) * 100}%` }} />
-                    <div className="h-full bg-[hsl(var(--dead))]" style={{ width: `${(cat.dead / cat.total) * 100}%` }} />
-                  </div>
+                  {cat.total > 0 && (
+                    <div className="h-1 w-full bg-muted overflow-hidden flex rounded-full opacity-50 group-hover:opacity-100 transition-opacity">
+                      <div className="h-full bg-[hsl(var(--live))]" style={{ width: `${(cat.live / cat.total) * 100}%` }} />
+                      <div className="h-full bg-[hsl(var(--dead))]" style={{ width: `${(cat.dead / cat.total) * 100}%` }} />
+                    </div>
+                  )}
                 </button>
               ))}
             </div>
