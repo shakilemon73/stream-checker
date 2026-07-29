@@ -11,6 +11,7 @@ import {
   useProbeChannels,
   getGetJobQueryKey,
   getGetJobCategoriesQueryKey,
+  getGetJobResultsQueryKey,
   ChannelResult
 } from "@workspace/api-client-react";
 import { useQueryClient } from "@tanstack/react-query";
@@ -30,6 +31,7 @@ import {
 import { 
   Drawer, DrawerContent, DrawerHeader, DrawerTitle, DrawerDescription 
 } from "@/components/ui/drawer";
+import { StreamPlayer } from "@/components/stream-player";
 
 // Status color mapping for chips
 const statusColors = {
@@ -102,10 +104,11 @@ export default function JobMonitor() {
 
   // Load complete results if job is done
   const isFinished = liveStatus === "completed" || liveStatus === "cancelled" || liveStatus === "failed";
+  const resultsParams = { page: 1, limit: 10000, search, category: categoryFilter !== "all" ? categoryFilter : undefined, status: statusFilter.join(","), sortBy, sortDir };
   const { data: apiResults, isLoading: resultsLoading } = useGetJobResults(
-    jobId, 
-    { page: 1, limit: 10000, search, category: categoryFilter !== "all" ? categoryFilter : undefined, status: statusFilter.join(","), sortBy, sortDir }, 
-    { query: { enabled: !!jobId && isFinished } }
+    jobId,
+    resultsParams,
+    { query: { enabled: !!jobId && isFinished, queryKey: getGetJobResultsQueryKey(jobId, resultsParams) } }
   );
 
   // Sync initial stats
@@ -625,7 +628,19 @@ export default function JobMonitor() {
               </DrawerHeader>
               <ScrollArea className="flex-1">
                 <div className="p-6 space-y-6">
-                  
+
+                  {/* ── Stream Player ─────────────────────────────────── */}
+                  <div className="space-y-2">
+                    <h3 className="text-sm font-semibold uppercase tracking-wider text-muted-foreground flex items-center gap-2">
+                      <Play className="w-4 h-4" /> Live Preview
+                    </h3>
+                    <StreamPlayer
+                      url={selectedResult.url}
+                      mimeType={selectedResult.mimeType}
+                      title={selectedResult.tvgName ?? undefined}
+                    />
+                  </div>
+
                   {/* HTTP Check Data */}
                   <div className="space-y-3">
                     <h3 className="text-sm font-semibold uppercase tracking-wider text-muted-foreground flex items-center gap-2">

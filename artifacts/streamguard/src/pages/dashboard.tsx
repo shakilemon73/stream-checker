@@ -32,6 +32,8 @@ export default function Dashboard() {
   const [m3uText, setM3uText] = useState("");
   const [m3uUrl, setM3uUrl] = useState("");
   const [playlistName, setPlaylistName] = useState("");
+  const [m3uFile, setM3uFile] = useState<File | null>(null);
+  const [fileDragging, setFileDragging] = useState(false);
 
   const handleRunCheck = async () => {
     if (!playlistName) {
@@ -46,9 +48,20 @@ export default function Dashboard() {
         inputData.content = m3uText;
       } else if (activeTab === "url") {
         inputData.url = m3uUrl;
-      } else {
-        // file upload not implemented in this demo fully, fallback to text
-        return;
+      } else if (activeTab === "file") {
+        if (!m3uFile) { alert("Please select an M3U file"); return; }
+        // Read file as base64 — the API decodes it on the server
+        const base64 = await new Promise<string>((resolve, reject) => {
+          const reader = new FileReader();
+          reader.onload = () => {
+            const result = reader.result as string;
+            // strip "data:...;base64," prefix
+            resolve(result.split(",")[1] ?? result);
+          };
+          reader.onerror = reject;
+          reader.readAsDataURL(m3uFile);
+        });
+        inputData.content = base64;
       }
 
       const playlist = await createPlaylist.mutateAsync({ data: inputData });
@@ -62,8 +75,7 @@ export default function Dashboard() {
             timeoutMs: parseInt(timeoutMs),
             retryCount: parseInt(retryCount),
             autoProbe,
-            perHostConcurrency: parseInt(perHostConcurrency)
-          }
+          } as any
         }
       });
 
@@ -125,9 +137,43 @@ export default function Dashboard() {
                     onChange={(e) => setM3uUrl(e.target.value)}
                   />
                 </TabsContent>
-                <TabsContent value="file" className="mt-0 outline-none p-8 flex flex-col items-center justify-center border-2 border-dashed border-muted m-2 rounded-lg text-muted-foreground bg-muted/20">
-                  <Upload className="w-8 h-8 mb-4 opacity-50" />
-                  <p>Drag and drop M3U file here, or click to select</p>
+                <TabsContent value="file" className="mt-0 outline-none">
+                  <label
+                    className={`m-2 flex flex-col items-center justify-center rounded-lg border-2 border-dashed p-8 cursor-pointer transition-colors ${
+                      fileDragging
+                        ? "border-primary bg-primary/5 text-primary"
+                        : m3uFile
+                        ? "border-primary/40 bg-primary/5"
+                        : "border-muted text-muted-foreground bg-muted/20 hover:border-primary/40 hover:bg-muted/30"
+                    }`}
+                    onDragOver={e => { e.preventDefault(); setFileDragging(true); }}
+                    onDragLeave={() => setFileDragging(false)}
+                    onDrop={e => {
+                      e.preventDefault();
+                      setFileDragging(false);
+                      const file = e.dataTransfer.files[0];
+                      if (file) setM3uFile(file);
+                    }}
+                  >
+                    <input
+                      type="file"
+                      accept=".m3u,.m3u8,.txt"
+                      className="sr-only"
+                      onChange={e => setM3uFile(e.target.files?.[0] ?? null)}
+                    />
+                    <Upload className="w-8 h-8 mb-3 opacity-50" />
+                    {m3uFile ? (
+                      <>
+                        <p className="font-medium text-sm text-primary">{m3uFile.name}</p>
+                        <p className="text-xs text-muted-foreground mt-1">{(m3uFile.size / 1024).toFixed(1)} KB — click to change</p>
+                      </>
+                    ) : (
+                      <>
+                        <p className="font-medium text-sm">Drop M3U file here, or click to browse</p>
+                        <p className="text-xs text-muted-foreground mt-1">Supports .m3u, .m3u8, .txt</p>
+                      </>
+                    )}
+                  </label>
                 </TabsContent>
               </div>
             </Tabs>
