@@ -25,6 +25,14 @@ app.use("*", cors({
   exposeHeaders: ["Content-Disposition"],
 }));
 
+app.get("/", (c) =>
+  c.json({
+    name: "StreamGuard API",
+    status: "ok",
+    endpoints: ["/health", "/playlists", "/jobs", "/results", "/settings"],
+  })
+);
+
 app.get("/health", (c) =>
   c.json({ ok: true, runtime: "cloudflare-workers", plan: "free" })
 );
