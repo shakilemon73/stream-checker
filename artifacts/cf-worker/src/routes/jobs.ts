@@ -1,5 +1,5 @@
 import { Hono } from "hono";
-import { eq, and, ilike, count, asc, desc } from "drizzle-orm";
+import { eq, and, ilike, count, asc, desc, inArray } from "drizzle-orm";
 import { getDb } from "../db.js";
 import {
   jobsTable,
@@ -256,7 +256,11 @@ jobs.get("/:id/results", async (c) => {
   const sortDir  = c.req.query("sortDir") ?? "asc";
 
   const conditions = [eq(resultsTable.jobId, id)];
-  if (status)   conditions.push(eq(resultsTable.status,   status));
+  if (status) {
+    const statuses = status.split(",").map((s) => s.trim()).filter(Boolean);
+    if (statuses.length === 1) conditions.push(eq(resultsTable.status, statuses[0]!));
+    else if (statuses.length > 1) conditions.push(inArray(resultsTable.status, statuses));
+  }
   if (category) conditions.push(eq(resultsTable.category, category));
   if (search)   conditions.push(ilike(resultsTable.tvgName, `%${search}%`));
 
@@ -370,6 +374,7 @@ jobs.get("/:id/export", async (c) => {
   if (statusFilter) {
     const statuses = statusFilter.split(",").map((s) => s.trim()).filter(Boolean);
     if (statuses.length === 1) conditions.push(eq(resultsTable.status, statuses[0]!));
+    else if (statuses.length > 1) conditions.push(inArray(resultsTable.status, statuses));
   }
   if (categoryFilter) conditions.push(eq(resultsTable.category, categoryFilter));
 

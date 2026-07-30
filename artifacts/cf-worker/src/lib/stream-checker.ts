@@ -53,7 +53,8 @@ export async function checkStream(
   let lastError = "";
   let url = originalUrl;
 
-  for (let attempt = 0; attempt <= Math.max(opts.retryCount, 2); attempt++) {
+  // Cap at opts.retryCount (don't force a minimum — CF free tier has a 50-subrequest budget)
+  for (let attempt = 0; attempt <= opts.retryCount; attempt++) {
     if (attempt > 0) {
       await delay(Math.min(600 * attempt, 3000));
     }
