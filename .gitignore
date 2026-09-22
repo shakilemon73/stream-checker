@@ -47,9 +47,6 @@ Thumbs.db
 # Replit
 .cache/
 .local/
-<<<<<<< HEAD
 
 # Local database data
 .data/
-=======
->>>>>>> origin/master
