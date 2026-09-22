@@ -1,0 +1,50 @@
+{
+  "name": "workspace",
+  "version": "0.0.0",
+  "license": "MIT",
+  "packageManager": "pnpm@10.26.1",
+  "scripts": {
+    "dev": "node artifacts/api-server/build.mjs && ./artifacts/streamguard/node_modules/.bin/vite build --config artifacts/streamguard/vite.config.ts && node artifacts/api-server/dist/index.mjs",
+    "build": "./artifacts/streamguard/node_modules/.bin/vite build --config artifacts/streamguard/vite.config.ts && node artifacts/api-server/build.mjs",
+    "start": "node artifacts/api-server/dist/index.mjs"
+  },
+  "private": true,
+  "dependencies": {
+    "@electric-sql/pglite": "^0.5.8",
+    "@replit/connectors-sdk": "^0.4.1"
+  },
+  "devDependencies": {
+    "prettier": "^3.9.5",
+    "typescript": "~5.9.3"
+  },
+  "workspaces": {
+    "packages": [
+      "artifacts/*",
+      "lib/*",
+      "scripts"
+    ],
+    "catalog": {
+      "@replit/vite-plugin-cartographer": "^0.2.7",
+      "@replit/vite-plugin-dev-banner": "^0.1.1",
+      "@replit/vite-plugin-runtime-error-modal": "^0.0.3",
+      "@tailwindcss/vite": "^4.1.3",
+      "@tanstack/react-query": "^5.66.0",
+      "@types/node": "^22.13.4",
+      "@types/react": "^19.0.10",
+      "@types/react-dom": "^19.0.4",
+      "@vitejs/plugin-react": "^4.3.4",
+      "class-variance-authority": "^0.7.1",
+      "clsx": "^2.1.1",
+      "drizzle-orm": "^0.45.1",
+      "framer-motion": "^12.4.7",
+      "lucide-react": "^0.475.0",
+      "react": "^19.0.0",
+      "react-dom": "^19.0.0",
+      "tailwind-merge": "^3.0.1",
+      "tailwindcss": "^4.1.3",
+      "tsx": "^4.19.3",
+      "vite": "^6.1.1",
+      "zod": "^3.24.2"
+    }
+  }
+}

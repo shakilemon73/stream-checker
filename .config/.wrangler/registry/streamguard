@@ -1,0 +1,5 @@
+{
+  "debugPortAddress": "127.0.0.1:35751",
+  "defaultEntrypointService": "core:user:streamguard",
+  "userWorkerService": "core:user:streamguard"
+}
