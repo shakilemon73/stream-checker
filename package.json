@@ -6,8 +6,12 @@
   "scripts": {
     "dev": "node artifacts/api-server/build.mjs && ./artifacts/streamguard/node_modules/.bin/vite build --config artifacts/streamguard/vite.config.ts && node artifacts/api-server/dist/index.mjs",
     "build": "./artifacts/streamguard/node_modules/.bin/vite build --config artifacts/streamguard/vite.config.ts && node artifacts/api-server/build.mjs",
+<<<<<<< HEAD
     "start": "node artifacts/api-server/dist/index.mjs",
     "deploy": "wrangler deploy"
+=======
+    "start": "node artifacts/api-server/dist/index.mjs"
+>>>>>>> origin/master
   },
   "private": true,
   "dependencies": {
@@ -16,8 +20,12 @@
   },
   "devDependencies": {
     "prettier": "^3.9.5",
+<<<<<<< HEAD
     "typescript": "~5.9.3",
     "wrangler": "^4.136.1"
+=======
+    "typescript": "~5.9.3"
+>>>>>>> origin/master
   },
   "workspaces": {
     "packages": [
