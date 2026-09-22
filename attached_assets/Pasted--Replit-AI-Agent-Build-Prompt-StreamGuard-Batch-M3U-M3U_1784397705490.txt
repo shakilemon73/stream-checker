@@ -1,0 +1,109 @@
+# Replit AI Agent Build Prompt: StreamGuard — Batch M3U/M3U8/TS Stream Health & Playlist Manager
+
+Copy everything below into Replit AI Agent as your build instruction.
+
+---
+
+## PROJECT BRIEF
+
+Build **StreamGuard**, a production-grade web application for batch-validating IPTV/streaming links (HLS `.m3u8`, `.ts`, `.mpg/.mpeg`, direct MP4/FLV, and RTMP where feasible) from M3U/M3U8 playlists. It must detect live vs. dead channels with high accuracy (not just HTTP 200), report stream quality metadata, auto-organize channels by category/group, and export clean playlists. This is a professional operations tool, not a toy — treat reliability, concurrency control, and correctness of dead/live detection as the top priorities.
+
+## TECH STACK
+
+- **Backend**: Node.js + TypeScript, Express (or Fastify)
+- **Queue/concurrency**: `p-limit` or a custom worker-pool for concurrent checks (do NOT check thousands of streams with unbounded parallelism — that's how you get self-DDoS and false negatives)
+- **Stream probing**: `ffprobe` (via `fluent-ffmpeg` or direct child_process spawn of the system `ffmpeg`/`ffprobe` binary — install via Nix package in Replit) for real codec/resolution/framerate/bitrate detection
+- **HTTP client**: `undici` or `axios` with custom timeout/header control
+- **Database**: SQLite via `better-sqlite3` or `Drizzle ORM` (Postgres if the user wants persistence beyond a Repl restart — offer Replit's built-in Postgres)
+- **Frontend**: React + TypeScript + Vite, Tailwind CSS, shadcn/ui components
+- **Real-time progress**: WebSocket (Socket.IO) so the UI shows live progress as a batch of 5,000 channels is being checked, not a spinner with no feedback
+- **Background jobs**: BullMQ if Redis is available, otherwise an in-memory queue with SQLite-backed job persistence so a batch survives a server restart
+
+## CORE FUNCTIONAL REQUIREMENTS
+
+### 1. Playlist Ingestion
+- Accept input via: pasted M3U/M3U8 text, uploaded `.m3u`/`.m3u8` file, or a remote playlist URL to fetch and parse
+- Full M3U/M3U8 parser supporting: `#EXTM3U`, `#EXTINF` (duration, `tvg-id`, `tvg-name`, `tvg-logo`, `group-title`, `tvg-language`, `tvg-country`), `#EXTGRP`, `#EXTVLCOPT` (user-agent, referrer headers), and Xtream Codes-style URLs
+- Strip BOM (byte order mark) and handle malformed/non-standard M3U gracefully — log a "parse warnings" report rather than silently dropping lines
+- Deduplicate identical stream URLs before checking (log duplicates found)
+- Support playlists up to at least 20,000 entries without choking the UI (virtualized list rendering — use `@tanstack/react-virtual`)
+
+### 2. Multi-Stage Stream Verification (this is the differentiator — don't just do a HEAD request)
+Implement a **tiered checking pipeline**, escalating only as needed to keep it fast at scale:
+
+**Stage 1 — Fast reachability check** (all channels, high concurrency ~50-100)
+- HTTP GET (not just HEAD — many IPTV servers don't support HEAD correctly) with a short byte-range request or early abort after first chunk
+- Custom User-Agent rotation (mimic VLC/3.0.x, ExoPlayer, and a generic browser UA — many IPTV origins block unrecognized UAs and this alone causes false dead-positives)
+- Follow redirects (track redirect chains, flag suspicious redirect loops)
+- Capture: HTTP status code, response headers (`Content-Type`, `Content-Length`), TLS validity, response time (ms)
+- Classify: `200/206` + streaming MIME type (`application/vnd.apple.mpegurl`, `video/mp2t`, `application/x-mpegURL`, `video/mpeg`, etc.) → passes to Stage 2. `403/451` → flag as **Geoblocked**, not simply dead. `404/410/timeout/connection refused` → **Dead**. Other 4xx/5xx → **Suspicious**, retry with backoff before finalizing.
+
+**Stage 2 — Manifest/content validation** (only for candidates that passed Stage 1)
+- For `.m3u8`: fetch and parse the actual HLS manifest. Verify it contains valid `#EXT-X-STREAM-INF` (master playlist) or `#EXTINF` segments (media playlist). A stream returning HTTP 200 with an empty or malformed manifest is a **false positive** for "alive" — catch this.
+- For master playlists, recursively resolve at least one variant stream to confirm it's actually reachable, not just the manifest pointer.
+- For `.ts`/`.mpg` direct streams: verify actual byte payload starts with a valid transport-stream sync byte (`0x47`) or appropriate magic bytes rather than trusting Content-Type alone.
+
+**Stage 3 — Deep quality probe** (only run on-demand or for a user-selected subset, since ffprobe is expensive)
+- Run `ffprobe` against the stream (with a hard timeout, e.g. 8-10s) to extract: video codec, resolution, framerate, audio codec, audio bitrate, container/segment info
+- Flag **mislabeled channels**: e.g., channel name says "4K" or "1080p" but probed resolution is 480p; flag framerate below 24fps as suspect
+- Optionally capture a thumbnail frame (via ffmpeg `-vframes 1`) for visual confirmation in the UI
+
+- **Retry logic**: exponential backoff (e.g. 3 attempts: immediate, +2s, +5s) for timeouts/connection resets before marking Dead — transient network blips are common with IPTV origins and shouldn't cause false negatives
+- **Configurable per-batch settings**: timeout (default 8s), concurrency level (default 30, max 100), retry count, whether to run Stage 3 automatically or only manually
+
+### 3. Batch Processing & Live Progress
+- User submits a playlist → job is queued → WebSocket streams live per-channel results to the UI as they complete (not after the whole batch finishes)
+- Live counters: Total / Checked / Live / Dead / Geoblocked / Suspicious, plus an ETA based on rolling average check time
+- Pausable/cancelable jobs
+- Batch history persisted (so past runs can be reviewed/re-exported without re-checking)
+
+### 4. Category Organization
+- Auto-group by `group-title` from the M3U metadata
+- Allow manual re-categorization/drag-and-drop in the UI (bulk move channels between categories)
+- Auto-detect likely category from channel name when `group-title` is missing (simple keyword/heuristic matching — e.g. "Sports", "News", "Movies", "Kids" — configurable rule list, not hardcoded to one region)
+- Support nested/custom category trees, not just flat groups
+
+### 5. Export / Download
+- Export filtered playlist as clean `.m3u8` (e.g., "Live only", "Live + Suspicious", specific categories only) preserving original `#EXTINF` metadata plus check-time metadata as comments
+- Export a full **audit report**: CSV/JSON with per-channel status, response time, resolution, last-checked timestamp, failure reason
+- "Diff" view between two checks of the same playlist over time (what went dead since last week, what's new)
+
+### 6. Scheduling (stretch but valuable — include if time allows)
+- Cron-style recurring re-checks of a saved playlist (e.g., every 6 hours) using node-cron, storing history for trend tracking
+- Optional webhook/notification (e.g., simple email via a free provider, or just an in-app alert feed) when a previously-live channel count of dead channels crosses a threshold
+
+## UI/UX REQUIREMENTS
+- Dashboard: paste/upload playlist → configure check settings → run
+- Results table: virtualized, sortable, filterable (by status, category, resolution, response time), with color-coded status chips (green=live, red=dead, yellow=geoblocked/suspicious)
+- Category sidebar with counts
+- Per-channel detail drawer showing full probe results + thumbnail if captured
+- Clean dark-mode-first UI (this is an IPTV/streaming tool — the audience expects a broadcast-console aesthetic, not a generic admin template). Distinct typography, not default Inter-everywhere.
+- Mobile-responsive since this may be checked from a phone occasionally
+
+## NON-FUNCTIONAL REQUIREMENTS
+- **Rate-limit self-imposed concurrency per target host** — if 200 channels in a playlist share the same origin domain, don't blast all 200 simultaneously; cap per-host concurrency (e.g., max 10 concurrent to any single hostname) to avoid getting IP-banned by the source server and to avoid false "dead" results from self-inflicted throttling
+- All outbound requests must have hard timeouts — no request should be able to hang the worker pool
+- Store playlist source URLs/credentials securely; never log full URLs with embedded auth tokens in plaintext application logs (redact query params like `token=`, `pass=`, `user=`)
+- Graceful handling of self-signed/invalid TLS certs (many IPTV origins have bad certs) — flag as a warning, don't hard-fail the check for TLS-only issues if content is otherwise reachable, but surface it clearly
+- Environment-based config (`.env`) for defaults: default concurrency, timeout, ffprobe path
+
+## BUILD ORDER (tell the agent to build in this sequence)
+1. Scaffold Express + TypeScript backend, React + Vite frontend, shared types package
+2. M3U/M3U8 parser with full metadata extraction + test fixtures (include a few sample malformed playlists to test against)
+3. Stage 1 fast HTTP checker with concurrency control and per-host throttling
+4. WebSocket live progress pipe from backend job to frontend
+5. Results UI: virtualized table, filters, status chips
+6. Stage 2 manifest validation
+7. Category grouping + manual re-org UI
+8. Export (filtered M3U + CSV/JSON report)
+9. Stage 3 ffprobe deep probe (on-demand)
+10. Batch history + diff view
+11. Scheduling (if time remains)
+12. Polish: dark broadcast-console theme, empty states, error states, loading skeletons
+
+## IMPORTANT SCOPE NOTE FOR THE AGENT
+This tool checks and organizes stream **links that the user already has** (their own playlists/subscriptions). It does not scrape, aggregate, or source new third-party streams, and it does not attempt to bypass DRM, paywalls, or authentication on protected content — it only reports the technical reachability/quality of URLs the user provides. Keep the feature set scoped to link validation, health checking, and playlist organization/export.
+
+---
+
+*End of prompt.*

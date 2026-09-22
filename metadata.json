@@ -1,0 +1,6 @@
+{
+  "name": "StreamGuard",
+  "description": "IPTV playlist analyzer, channel validator, and stream health monitor with real-time probe diagnostics.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

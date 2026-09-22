@@ -1,0 +1,3 @@
+- [StreamGuard codegen fix](streamguard-codegen.md) — Orval appends to api-zod/src/index.ts causing TS2308 collisions; fix requires running orval then overwriting index.ts manually
+- [CF Worker architecture](cf-worker-architecture.md) — Hono + Neon HTTP + Durable Objects port of the Express API; key diffs: no ffprobe, custom limiter, DO WebSockets, atob instead of Buffer
+- [Browser IPTV playback](browser-iptv-playback.md) — Custom User-Agent/referrer headers require a same-origin relay that rewrites every HLS manifest URI
